@@ -1,0 +1,120 @@
+#include <SDHCI.h>
+#include <Audio.h>
+#define BAUDRATE (115200)
+AudioClass *theAudio;
+SDClass SD;
+
+int trigPin = 8; 
+int echoPin = 7;    
+int ledPin = 13;   
+long duration, cm;
+int value;
+
+File mp3file;
+bool ErrEnd = false;
+int volume = -160; // vol 120n to -1020
+int track =1; // currently selected mp3 track 1.mp3, 2.mp3, 3.mp3
+int err; // some sony variable, dont worry about it
+int track_max =2; // highest number of tracks in sd card eg 99.mp3 
+
+int switch_val = 0; // adc switches value
+bool mid_switch = 0; // play/pause
+bool tol_switch = 0;// prev song
+bool tor_switch = 0;// next song
+
+//Sets up error code for if the track fails to load or stream data continously.
+static void audio_attention_cb(const ErrorAttentionParam *atprm)
+{
+   if (atprm->error_code >= AS_ATTENTION_CODE_WARNING)
+    {      ErrEnd = true;   }
+}
+
+void setup() {
+  //Serial Port begin
+  Serial.begin(BAUDRATE);
+  while (!Serial)
+   {
+     ; /* wait for serial port to connect. Needed for native USB port only */
+   }
+  //Define inputs and outputs
+  pinMode(trigPin, OUTPUT);
+  pinMode(ledPin, OUTPUT);      // declare LED as output
+  pinMode(echoPin, INPUT);
+  theAudio = AudioClass::getInstance();
+  theAudio->begin(audio_attention_cb);
+  theAudio->setRenderingClockMode(AS_CLKMODE_NORMAL);
+  theAudio->setPlayerMode(AS_SETPLAYER_OUTPUTDEVICE_SPHP, AS_SP_DRV_MODE_LINEOUT);
+  err_t err = theAudio->initPlayer(AudioClass::Player0, AS_CODECTYPE_MP3, "/mnt/sd0/BIN", AS_SAMPLINGRATE_AUTO, AS_CHANNEL_STEREO);
+  err = theAudio->writeFrames(AudioClass::Player0, mp3file);
+  theAudio->setVolume(volume);
+  theAudio->startPlayer(AudioClass::Player0);
+}
+
+void loop()
+{
+// run music //     
+    while(mid_switch==0)
+   {
+     getDistance();
+     Scan_Switches();
+     err = theAudio->writeFrames(AudioClass::Player0, mp3file);     
+      if (err == AUDIOLIB_ECODE_FILEEND)
+        Song_Change();
+        theAudio->stopPlayer(AudioClass::Player0);
+        mp3file.close();
+   }
+}
+//Method for getting distance through the Ultrasonic distance sensor module.
+void getDistance(void) {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(5);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  // Read the signal from the sensor: a HIGH pulse whose
+  // duration is the time (in microseconds) from the sending
+  // of the ping to the reception of its echo off of an object.
+  pinMode(echoPin, INPUT);
+  duration = pulseIn(echoPin, HIGH);
+  // Convert the time into a distance
+  cm = (duration/2) / 29.1;     // Divide by 29.1 or multiply by 0.0343
+  value = cm;
+  return;
+}
+void Scan_Switches (void)
+{
+  //Scans the value obtained through getDistance method to sort into which track depending on DB readings.
+  if(value <= 100){
+      if (value < 10){
+        tol_switch =1;
+        Serial.println("Hitting Under 10");
+      }
+      if (value >= 30){
+        tor_switch =1;
+        Serial.println("Hitting Over 30");
+      }
+    }
+}
+// Method for turning off current playing track, and turn on requested track.
+void Song_Change(void)
+{
+if (tol_switch==1)
+{
+  tol_switch =0;
+  theAudio->stopPlayer(AudioClass::Player0);
+  mp3file.close();
+  mp3file = SD.open("1.mp3");
+  err = theAudio->writeFrames(AudioClass::Player0, mp3file);
+  theAudio->startPlayer(AudioClass::Player0);
+}
+
+if (tor_switch==1)
+{
+  tor_switch =0;
+  theAudio->stopPlayer(AudioClass::Player0);
+  mp3file.close();
+  mp3file = SD.open("2.mp3");
+  err = theAudio->writeFrames(AudioClass::Player0, mp3file);
+  theAudio->startPlayer(AudioClass::Player0);
+  }
+}
